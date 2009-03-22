@@ -1,0 +1,13 @@
+#summary Microcosm design ideas
+
+= Ideas =
+
+  * The entire system must be designed in the most decentralized way possible -- perhaps P2P might come into play?
+  * While a client is in a given cosm, they will maintain a connection to the server
+
+
+= Questions =
+
+  * Should cosm code only run on the servers, or should there be a facility to run code on the clients?
+    * If code runs only on the server, then the server and any client can be written in any language running on any platform
+    * If code is allowed to run on the clients, then the clients must all be capable of running the same code -- .NET obviously seems best suited to this
