@@ -1,4 +1,5 @@
 #summary Portal for all things design
+#labels Featured,Phase-Requirements
 
 = Overall Design =
   * [Ideas]
