@@ -7,5 +7,6 @@
 
 = Protocol =
   * ProtocolIdeas
+  * CosmProtocol
 
 = Reference Implementation =
