@@ -5,6 +5,17 @@ using Microcosm.Common;
 namespace Microcosm.Server {
 	[CosmInterface]
 	public class Avatar {
-		public remoteEvent(0) event PositionUpdate : CosmEventHandler [(float * float * float) * (float * float * float)]
+		mutable AvatarId_ : int = -1;
+		
+		public remoteEvent(0) event PositionUpdate : CosmEventHandler [(float * float * float) * (float * float * float)];
+		
+		remoteProperty(1) AvatarIdClient : int { get }
+		public AvatarId : int {
+			get {
+				when(AvatarId_ == -1)
+					AvatarId_ = AvatarIdClient;
+				AvatarId_
+			}
+		}
 	}
 }
