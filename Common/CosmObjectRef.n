@@ -1,0 +1,22 @@
+namespace Microcosm.Common {
+	public abstract class CosmObjectRef {
+		protected Conn : Connection;
+		public Id : int;
+		
+		public this(conn : Connection) {
+			Conn = conn;
+			Id = Conn.RemoteBaseObj;
+			Conn.AddRemoteRef(Id)
+		}
+		
+		public this(conn : Connection, id : int) {
+			Conn = conn;
+			Id = id;
+			Conn.AddRemoteRef(id)
+		}
+		
+		protected override Finalize() : void {
+			Conn.FreeRemoteRef(Id)
+		}
+	}
+}

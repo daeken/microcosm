@@ -1,0 +1,127 @@
+using Nextem.String;
+
+using Microcosm.Common;
+
+namespace Microcosm.Server {
+	type Point = float * float;
+	type Vert = float * float * float;
+	type Color = float * float * float;
+	type Tri = (int * int * int) * (Color * Color * Color);
+	
+	[Record]
+	[CosmClass]
+	public class Model {
+		verts : list [Vert];
+		tris : list [Tri];
+		
+		public cosmProperty(0) Verts : list [Vert] { get { verts } }
+		public cosmProperty(1) Tris : list [Tri] { get { tris } }
+		
+		public static Cube(
+			a : Vert, 
+			b : Vert, 
+			color : Color
+		) : Model {
+			def (ax, ay, az) = a;
+			def (bx, by, bz) = b;
+			Extrude(
+				[
+					(ax, ay), 
+					(bx, ay), 
+					(bx, by), 
+					(ax, by)
+				], 
+				az, 
+				bz, 
+				color
+			)
+		}
+		
+		public static Extrude(
+			line : list [Point], 
+			front : float, 
+			back : float, 
+			color : Color
+		) : Model {
+			def color = (color, color, color);
+			def subExtrude(line, verts, tris) {
+				match(line) {
+					| (ax, ay) :: (bx, by) :: _ =>
+						def ind = verts.Length;
+						subExtrude(
+							line.Tail, 
+							verts + [
+								(ax, ay, front), 
+								(bx, by, front), 
+								(bx, by, back ), 
+								(ax, ay, back )
+							],
+							tris + [
+								((ind+0, ind+1, ind+2), color),
+								((ind+0, ind+3, ind+2), color)
+							]
+						)
+					| _ => (verts, tris)
+				}
+			}
+			
+			def subFaces(line, verts, tris) {
+				match(line) {
+					| (ax, ay) :: (bx, by) :: (cx, cy) :: _ =>
+						def ind = verts.Length;
+						subFaces(
+							line.Tail, 
+							verts + [
+								(ax, ay, front), 
+								(bx, by, front), 
+								(cx, cy, front), 
+								(ax, ay, back), 
+								(bx, by, back), 
+								(cx, cy, back)
+							], 
+							tris + [
+								((ind+0, ind+1, ind+2), color), 
+								((ind+3, ind+4, ind+5), color)
+							]
+						)
+					| _ => (verts, tris)
+				}
+			}
+			
+			def line = line + [line.Head];
+			def (verts, tris) = subExtrude(line, [], []);
+			Model(subFaces(line, verts, tris))
+		}
+		
+		public static House(w : float, h : float, d : float, oh : float, mainColor : Color, roofColor: Color) : Model {
+			def hw = w/2f;
+			def hd = d/2f;
+			Cube(
+				(-hw, 0f, -hd), 
+				( hw, h,  hd),
+				mainColor
+			) + Extrude(
+				[
+					(-hw-oh, h), 
+					( 0f   , h+(h/2f)), 
+					( hw+oh, h)
+				], 
+				-hd, 
+				 hd, 
+				roofColor
+			)
+		}
+		
+		public static @+(a : Model, b : Model) : Model {
+			def off = a.verts.Length;
+			Model(
+				a.verts + b.verts, 
+				a.tris + b.tris.Map(
+					fun((aV, bV, cV), (aC, bC, cC)) {
+						((aV+off, bV+off, cV+off), (aC, bC, cC))
+					}
+				)
+			)
+		}
+	}
+}
