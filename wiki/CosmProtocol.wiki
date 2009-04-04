@@ -1,0 +1,29 @@
+#summary Design of Cosm protocol alpha1
+#labels Phase-Design,Featured
+
+= Cosm (Initial object from server) =
+  # `GetPlace(path : string) : Place`
+
+= Viewer (Initial object from client) =
+  # `Avatar : Avatar { get }` -- Gets the avatar object for the viewer
+
+= Avatar =
+  # `event PositionUpdate : CosmEventHandler [(float * float * float) * (float * float * float)]` -- The server can attach to this event to get position updates, e.g. in a multiuser env
+  # `Model : Model { get }`
+
+= Place =
+  # `Places : list [Place] { get }`
+  # `Renderables : list [Renderable] { get }`
+  # `IsMultiUser : bool { get }`
+  # `event AvatarUpdate : CosmEventHandler [int * ((float * float * float) * (float * float * float))]` -- If the Place is multi-user, this will allow viewers to get avatar information
+  # `StartLocation : (float * float * float) * (float * float * float) { get }` -- This is the starting position and orientation for avatars
+  # `Enter(viewer : Viewer) : void` -- Called on entrance
+
+= Renderable =
+  # `Position : float * float * float { get }`
+  # `Orientation : float * float * float { get }`
+  # `Model : Model { get }`
+
+= Model _(Needs texturing support)_ =
+  # `Verts : list [float * float * float] { get }`
+  # `Tris : list [(int * int * int) * (Color * Color * Color)] { get }` -- The ints are indexes into Verts.  Color is an alias for `float * float * float * float`: RGBA 0...1
