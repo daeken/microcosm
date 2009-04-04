@@ -20,6 +20,7 @@ namespace Microcosm.Viewer {
 	[CosmInterface]
 	public class Cosm {
 		public remoteMethod(0) GetPlace(path : string) : Place;
+		public remoteProperty(1) AvatarId : int { get }
 	}
 	
 	[CosmInterface]
@@ -30,6 +31,7 @@ namespace Microcosm.Viewer {
 		public remoteEvent(3) event AvatarUpdate : CosmEventHandler [int * ((float * float * float) * (float * float * float))];
 		public remoteProperty(4) StartLocation : (float * float * float) * (float * float * float) { get }
 		public remoteMethod(5) Enter(viewer : Viewer) : void;
+		public remoteProperty(6) DefaultAvatarModel : Model { get }
 		
 		[Memoize]
 		public GetRenderables() : list [Renderable] {
@@ -60,13 +62,20 @@ namespace Microcosm.Viewer {
 		}
 	}
 	
+	[Record(Include=[avatarId])]
 	[CosmClass]
 	public class Avatar {
+		avatarId : int;
+		
 		cosmEvent(0) event PositionUpdate : CosmEventHandler [(float * float * float) * (float * float * float)];
+		public cosmProperty(1) AvatarId : int { get { avatarId } }
 		
 		public Move(pos : float * float * float, orient : float * float * float) : void {
-			unless(PositionUpdate == null)
-				PositionUpdate((pos, orient))
+			unless(PositionUpdate == null) {
+				def (x, y, z) = pos;
+				def (rx, ry, rz) = orient;
+				PositionUpdate(((-x, -y, -z), (-rx, -ry, -rz)))
+			}
 		}
 	}
 	
@@ -91,15 +100,22 @@ namespace Microcosm.Viewer {
 		CurAvatar : Avatar;
 		cosmProperty(0) Avatar_ : Avatar { get { CurAvatar } }
 		
+		AvatarModel : Model;
+		Avatars : Hashtable [int, (float * float * float) * (float * float * float)] = Hashtable();
+		
 		this() {
-			CurAvatar = Avatar();
-			
 			def client = TcpClient();
 			client.Connect(IPAddress.Parse("127.0.0.1"), 90);
 			Conn = Connection(client.GetStream(), this);
 			Server = Cosm(Conn);
+			CurAvatar = Avatar(Server.AvatarId);
 			CurPlace = Server.GetPlace("/");
 			(PosX, PosY, PosZ) = CurPlace.StartLocation[0];
+			
+			CurPlace.AvatarUpdate += AvatarUpdate;
+			
+			AvatarModel = CurPlace.DefaultAvatarModel;
+			
 			CurPlace.Enter(this);
 			
 			Setup();
@@ -137,7 +153,8 @@ namespace Microcosm.Viewer {
 					when(Looking) {
 						RotX += (e.Y - (Height / 2)) * 1f;
 						RotY += (e.X - (Width  / 2)) * 1f;
-						Mouse.MousePosition = System.Drawing.Point((Width / 2) :> int, (Height / 2) :> int)
+						Mouse.MousePosition = System.Drawing.Point((Width / 2) :> int, (Height / 2) :> int);
+						CurAvatar.Move((PosX, PosY, PosZ), (RotX, RotY, 0f))
 					}
 				}
 			Events.KeyboardDown += 
@@ -173,6 +190,12 @@ namespace Microcosm.Viewer {
 			//glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 		}
 		
+		AvatarUpdate(id : int, loc : (float * float * float) * (float * float * float)) : void {
+			unless(id == CurAvatar.AvatarId)
+				lock(Avatars)
+					Avatars[id] = loc
+		}
+		
 		Reshape(distance : float) : void {
 			glViewport(0, 0, Width :> int, Height :> int);
 			glMatrixMode(GL_PROJECTION);
@@ -190,6 +213,19 @@ namespace Microcosm.Viewer {
 			glTranslatef(PosX, PosY, PosZ);
 			
 			CurPlace.GetRenderables().Iter(Render);
+			
+			foreach((pos, orient) in Avatars.Values) {
+				glPushMatrix();
+				glTranslatef(pos);
+				glRotatef(orient[0], 1f, 0f, 0f);
+				glRotatef(orient[1], 0f, 1f, 0f);
+				glRotatef(orient[2], 0f, 0f, 1f);
+				glBegin(GL_TRIANGLES);
+				Render(AvatarModel.Get());
+				glEnd();
+				glPopMatrix()
+			}
+			
 			Video.GLSwapBuffers()
 		}
 		

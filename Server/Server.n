@@ -9,13 +9,31 @@ namespace Microcosm.Server {
 	public class Server {
 		public DefaultPlace : Place;
 		
+		mutable avatarId : int = 0;
+		AvatarId : int {
+			get {
+				lock(this) {
+					avatarId++;
+					avatarId
+				}
+			}
+		}
+		
 		this() {
+			def avatar = 
+				Model.Cube(
+					(-0.5f, -0.5f, -0.5f), 
+					( 0.5f,  0.5f,  0.5f), 
+					(1f, 0f, 1f)
+				);
+			
 			DefaultPlace = 
 				Place(
 					[], 
 					BuildHouses(), 
 					true, 
-					((0f, -4f, -25f), (0f, 0f, 0f))
+					((0f, -4f, -25f), (0f, 0f, 0f)), 
+					avatar
 				);
 			
 			def listener = TcpListener(IPAddress.Any, 90);
@@ -49,7 +67,8 @@ namespace Microcosm.Server {
 		}
 		
 		GotClient(client : TcpClient) : void {
-			def _conn = Connection(client.GetStream(), Cosm(this));
+			def _conn = 
+				Connection(client.GetStream(), Cosm(this, AvatarId));
 		}
 		
 		public static Main() : void {

@@ -7,8 +7,11 @@ namespace Microcosm.Server {
 	public class Cosm {
 		Server : Server;
 		
-		public this(server : Server) {
-			Server = server
+		avatarId : int = 0;
+		
+		public this(server : Server, avatarId : int) {
+			Server = server;
+			this.avatarId = avatarId
 		}
 		
 		cosmMethod(0) GetPlace(path : string) : Place {
@@ -17,5 +20,7 @@ namespace Microcosm.Server {
 			else
 				null
 		}
+		
+		cosmProperty(1) AvatarId : int { get { avatarId } }
 	}
 }
