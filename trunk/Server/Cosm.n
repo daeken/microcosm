@@ -1,0 +1,21 @@
+using Nextem.String;
+
+using Microcosm.Common;
+
+namespace Microcosm.Server {
+	[CosmClass]
+	public class Cosm {
+		Server : Server;
+		
+		public this(server : Server) {
+			Server = server
+		}
+		
+		cosmMethod(0) GetPlace(path : string) : Place {
+			if(path == "/")
+				Server.DefaultPlace
+			else
+				null
+		}
+	}
+}

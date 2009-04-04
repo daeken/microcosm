@@ -1,0 +1,59 @@
+using System.Net;
+using System.Net.Sockets;
+using System.Threading;
+using Nextem.String;
+
+using Microcosm.Common;
+
+namespace Microcosm.Server {
+	public class Server {
+		public DefaultPlace : Place;
+		
+		this() {
+			DefaultPlace = 
+				Place(
+					[], 
+					BuildHouses(), 
+					true, 
+					((0f, -4f, -25f), (0f, 0f, 0f))
+				);
+			
+			def listener = TcpListener(IPAddress.Any, 90);
+			listener.Start();
+			
+			while(true)
+				Thread(fun(x : object) { GotClient(x :> TcpClient) }).Start(listener.AcceptTcpClient())
+		}
+		
+		BuildHouses() : list [Renderable] {
+			def colors = 
+				[
+					((1f, 0f, 0f), (0f, 0f, 1f)), 
+					((0f, 0f, 1f), (0f, 1f, 0f))
+				];
+			mutable houses = [];
+			mutable x = 6f * (colors.Length/2);
+			foreach((main, roof) in colors) {
+				houses ::= 
+					Renderable(
+						(x, 0f, 0f), 
+						(0f, 0f, 0f), 
+						Model.House(
+							6f, 8f, 15f, 1f, 
+							main, roof
+						)
+					);
+				x -= 12f
+			}
+			houses
+		}
+		
+		GotClient(client : TcpClient) : void {
+			def _conn = Connection(client.GetStream(), Cosm(this));
+		}
+		
+		public static Main() : void {
+			_ = Server()
+		}
+	}
+}

@@ -1,0 +1,195 @@
+using System;
+using System.IO;
+using System.Threading;
+using Nemerle.Collections;
+
+using Nextem.Stream;
+using Nextem.String;
+
+namespace Microcosm.Common {
+	public enum Opcode {
+		| Call
+		| Return
+		| Free
+		| DelegateCall
+	}
+	
+	public delegate CosmEventHandler [T](_ : T) : void;
+	
+	public class Connection {
+		public Stream : Stream;
+		public BWriter : BinaryWriter;
+		public BReader : BinaryReader;
+		public RemoteBaseObj : int;
+		public LocalObjectRefs : Hashtable [int, ICosmObject] = Hashtable();
+		RemoteObjectRefs : Hashtable [int, int] = Hashtable();
+		mutable ObjectId : int = -1;
+		Callbacks : Hashtable [int, Connection * BinaryReader -> void] = Hashtable();
+		mutable CallbackId : int = -1;
+		Delegates : Hashtable [int, object] = Hashtable();
+		mutable DelegateId : int = -1;
+		RemoteDelegates : Hashtable [int, object * (BinaryReader -> void)] = Hashtable();
+		
+		LoopThread : Thread;
+		
+		public this(stream : Stream, baseObj : ICosmObject) {
+			Stream = stream;
+			BWriter = BinaryWriter(Stream);
+			BReader = BinaryReader(Stream);
+			
+			BWriter.Write(StoreRef(baseObj));
+			RemoteBaseObj = BReader.ReadInt32();
+			
+			LoopThread = Thread(Loop);
+			LoopThread.Start()
+		}
+		
+		Loop() : void {
+			try {
+				while(true) {
+					def (opcd, reader) = Read();
+					match(opcd) {
+						| Call =>
+							def obj = LocalObjectRefs[reader.ReadInt32()];
+							def ord = reader.ReadInt32();
+							def msgId = reader.ReadInt32();
+							Thread(
+								fun() { obj.Call(this, reader, ord, msgId) }
+							).Start()
+						| Return =>
+							def id = reader.ReadInt32();
+							def cb = Callbacks[id];
+							Callbacks.Remove(id);
+							unless(cb == null)
+								cb(this, reader)
+						| Free =>
+							LocalObjectRefs.Remove(reader.ReadInt32())
+						| DelegateCall =>
+							def id = reader.ReadInt32();
+							Thread(
+								fun() { RemoteDelegates[id][1](reader) }
+							).Start()
+					}
+				}
+			} catch {
+				| _ is IOException => ()
+			}
+		}
+		
+		public Read() : Opcode * BinaryReader {
+			lock(BReader) {
+				def opcd = BReader.ReadInt32() :> Opcode;
+				def len = BReader.ReadInt32();
+				def data = BReader.ReadBytes(len);
+				(opcd, BinaryReader(MemoryStream(data)))
+			}
+		}
+		
+		public Write(opcd : Opcode, closure : BinaryWriter -> void) : void {
+			def stream = MemoryStream();
+			closure(BinaryWriter(stream));
+			def buf = stream.GetBuffer();
+			lock(BWriter) {
+				BWriter.Write(opcd :> int);
+				BWriter.Write(buf.Length);
+				BWriter.Write(buf)
+			}
+		}
+		
+		public Stop() : void {
+			LoopThread.Abort()
+		}
+		
+		public StoreRef(obj : ICosmObject) : int {
+			lock(LocalObjectRefs) {
+				ObjectId++;
+				LocalObjectRefs[ObjectId] = obj;
+				ObjectId
+			}
+		}
+		
+		public AddCallback(callback : Connection * BinaryReader -> void) : int {
+			lock(Callbacks) {
+				CallbackId = 
+					if(CallbackId == int.MaxValue) 0
+					else CallbackId + 1;
+				Callbacks[CallbackId] = callback;
+				CallbackId
+			}
+		}
+		
+		public AddRemoteRef(id : int) : void {
+			lock(RemoteObjectRefs) {
+				if(RemoteObjectRefs.ContainsKey(id))
+					RemoteObjectRefs[id]++
+				else
+					RemoteObjectRefs[id] = 1
+			}
+		}
+		
+		public FreeRemoteRef(id : int) : void {
+			lock(RemoteObjectRefs) {
+				RemoteObjectRefs[id]--;
+				when(RemoteObjectRefs[id] == 0)
+					lock(Stream) {
+						// XXX: Make this handle the server dying
+						//BWriter.Write(Opcode.Free :> int);
+						//BWriter.Write(id)
+					}
+			}
+		}
+		
+		public AddDelegate(del : object) : int {
+			lock(Delegates) {
+				DelegateId++;
+				Delegates[DelegateId] = del;
+				DelegateId
+			}
+		}
+		
+		public RemoveDelegate(id : int) : object {
+			lock(Delegates) {
+				def del = Delegates[id];
+				Delegates.Remove(id);
+				del
+			}
+		}
+		
+		public AddRemoteDelegate(objId : int, ord : int, del : object, cb : BinaryReader -> void) : void {
+			def callback(_, reader) {
+				def id = reader.ReadInt32();
+				lock(RemoteDelegates)
+					RemoteDelegates[id] = (del, cb)
+			}
+			
+			Write(
+				Opcode.Call, 
+				fun(writer) {
+					writer.Write(objId);
+					writer.Write(ord);
+					writer.Write(AddCallback(callback));
+					writer.Write(0 :> sbyte)
+				}
+			)
+		}
+		
+		public RemoveRemoteDelegate(objId : int, ord : int, del : object) : void {
+			mutable delId : int;
+			foreach(elem in RemoteDelegates)
+				when(elem.Value[0] : object == del)
+					delId = elem.Key;
+			
+			Write(
+				Opcode.Call, 
+				fun(writer) {
+					writer.Write(objId);
+					writer.Write(ord);
+					writer.Write(AddCallback(null));
+					writer.Write(1 :> sbyte);
+					writer.Write(delId);
+					RemoteDelegates.Remove(delId)
+				}
+			)
+		}
+	}
+}

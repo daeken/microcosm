@@ -1,0 +1,28 @@
+using Nextem.String;
+
+using Microcosm.Common;
+
+namespace Microcosm.Server {
+	[Record(Include=[places, renderables, isMultiUser, startLocation])]
+	[CosmClass]
+	public class Place {
+		places : list [Place];
+		renderables : list [Renderable];
+		isMultiUser : bool;
+		startLocation : (float * float * float) * (float * float * float);
+		
+		cosmProperty(0) Places : list [Place] { get { places } }
+		cosmProperty(1) Renderables : list [Renderable] { get { renderables } }
+		cosmProperty(2) IsMultiUser : bool { get { isMultiUser } }
+		cosmEvent(3) event AvatarUpdate : CosmEventHandler [int * ((float * float * float) * (float * float * float))];
+		cosmProperty(4) StartLocation : (float * float * float) * (float * float * float) { get { startLocation } }
+		
+		cosmMethod(5) Enter(viewer : Viewer) : void {
+			def avatar = viewer.Avatar;
+			avatar.PositionUpdate += 
+				fun(pos : float * float * float, _orient : float * float * float) {
+					print "Avatar moved to {0}" <- pos
+				}
+		}
+	}
+}

@@ -1,0 +1,10 @@
+using Nextem.String;
+
+using Microcosm.Common;
+
+namespace Microcosm.Server {
+	[CosmInterface]
+	public class Avatar {
+		public remoteEvent(0) event PositionUpdate : CosmEventHandler [(float * float * float) * (float * float * float)]
+	}
+}
