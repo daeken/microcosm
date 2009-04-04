@@ -6,7 +6,7 @@ The underlying protocol for Microcosm is a simple object access protocol.
 = Types =
   * List -- These are sent as a length (int32) followed by the contained objects.  The objects inside a list can only be of one type.
   * Tuple -- The data inside these is sent in order.  The objects can be of different types, but the length is fixed.
-  * String -- This is sent as a length (int32 -- length of the data, not the number of characters) followed by UTF-8 encoded text with no terminator.
+  * String -- This is sent as a length (int32 -- number of bytes, not the number of characters) followed by UTF-8 encoded text with no terminator.
   * All your standard integer/float types are sent as-is.  Bools are sent as an 8-bit int.
   * User-defined -- Described later.
 
@@ -14,23 +14,23 @@ The underlying protocol for Microcosm is a simple object access protocol.
   # Call:
     # Opcode : int = 0
     # Length : int -- Total length of the message, not counting opcode or length
-    # ObjId : int -- ID of the object containing the method to call
+    # ObjectId : int -- ID of the object containing the method to call
     # Ordinal : int -- ID of the method to call
-    # MsgId : int -- This is the ID sent back in the return, so the appropriate callback can be called
+    # MesssgeId : int -- This is the ID sent back in the return, so the appropriate callback can be called
     # Serialized arguments
   # Return:
     # Opcode : int = 1
     # Length : int -- Total length of the message, not counting opcode or length
-    # MsgId : int -- Return ID
+    # MessageId : int -- Return ID
     # Serialized return data
   # Free:
     # Opcode : int = 2
     # Length : int -- Total length of the message, not counting opcode or length
-    # ObjId : int -- Object to free
+    # ObjectId : int -- Object to free
   # DelegateCall:
     # Opcode : int = 3
     # Length : int -- Total length of the message, not counting opcode or length
-    # DelId : int -- ID of the delegate to call
+    # DelegateId : int -- ID of the delegate to call
     # Serialized arguments
 
 = User objects =
