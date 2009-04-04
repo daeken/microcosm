@@ -37,6 +37,8 @@ The underlying protocol for Microcosm is a simple object access protocol.
 
 User-defined objects are sent as an object id (int32), which can be used as the target for a Call, can be sent as an argument/return value, etc.  Note:  As it stands, object ids sent over the wire can have their sign bit set to indicate that the object resides on the callee side.  That is, if the server sends down an object, id 4, the client can call a method and pass 0x80000004 (4 with the sign bit set) as an argument to reference the server's own object.  If the server calls a method on the client and wants to reference an object on the client side, it does the same -- the sign bit always represents an object on the callee.
 
+When one side is done with an object from the other, a Free message containing the object id must be sent to release it.  Each side must ref-count the objects so that the Free message is only sent once per object.
+
 = Flow =
 
 When a client connects to a cosm, they send an initial object id (int32) and get an object id back.  All future communications take place through these objects and the objects returned by methods/properties/events therein.  To call a method, you send a Call message with the object target, ordinal (number of the method to call), and a unique message id.  Once the call is sent, a Return message will come back with the message id and the return value (if any).
