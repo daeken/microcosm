@@ -1,3 +1,4 @@
+using System.Math;
 using System.Net;
 using System.Net.Sockets;
 using Nemerle;
@@ -103,9 +104,9 @@ namespace Microcosm.Viewer {
 		AvatarModel : Model;
 		Avatars : Hashtable [int, (float * float * float) * (float * float * float)] = Hashtable();
 		
-		this() {
+		this(ip : string = "127.0.0.1", port : string = "90") {
 			def client = TcpClient();
-			client.Connect(IPAddress.Parse("127.0.0.1"), 90);
+			client.Connect(IPAddress.Parse(ip), int.Parse(port));
 			Conn = Connection(client.GetStream(), this);
 			Server = Cosm(Conn);
 			CurAvatar = Avatar(Server.AvatarId);
@@ -160,14 +161,24 @@ namespace Microcosm.Viewer {
 			Events.KeyboardDown += 
 				fun(_, e : KeyboardEventArgs) {
 					def move(x, z) {
-						PosX += x;
-						PosZ += z;
+						def xrad = (RotX / 180 * 3.141592654f); 
+						if(z != 0f) {
+							def yrad = (RotY / 180 * 3.141592654f);
+							PosX += z * (Sin(yrad) :> float);
+							PosY -= z * (Sin(xrad) :> float);
+							PosZ -= z * (Cos(yrad) :> float)
+						} else {
+							def yrad = ((RotY + 90f) / 180f * 3.141592654f); 
+							PosX += x * (Sin(yrad) :> float);
+							PosY -= x * (Sin(xrad) :> float);
+							PosZ -= x * (Cos(yrad) :> float)
+						}
 						CurAvatar.Move((PosX, PosY, PosZ), (RotX, RotY, 0f))
 					}
 					
 					match(e.Key) {
-						| W | UpArrow    => move( 0f,  1f)
-						| S | DownArrow  => move( 0f, -1f)
+						| W | UpArrow    => move( 0f, -1f)
+						| S | DownArrow  => move( 0f,  1f)
 						| A | LeftArrow  => move( 1f,  0f)
 						| D | RightArrow => move(-1f,  0f)
 						| _ => ()
@@ -255,8 +266,15 @@ namespace Microcosm.Viewer {
 			}
 		}
 		
-		public static Main() : void {
-			_ = Viewer()
+		public static Main(args : array [string]) : void {
+			def (ip, port) = 
+				if(args.Length == 0)
+					("127.0.0.1", "90")
+				else if(args.Length == 1)
+					(args[0], "90")
+				else
+					(args[0], args[1]);
+			_ = Viewer(ip, port)
 		}
 	}
 }
