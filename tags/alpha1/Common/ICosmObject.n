@@ -1,0 +1,7 @@
+using System.IO;
+
+namespace Microcosm.Common {
+	public abstract class ICosmObject {
+		public abstract Call(conn : Connection, reader : BinaryReader, ordinal : int, msgId : int) : void
+	}
+}

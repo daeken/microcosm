@@ -1,0 +1,26 @@
+using Nextem.String;
+
+using Microcosm.Common;
+
+namespace Microcosm.Server {
+	[CosmClass]
+	public class Cosm {
+		Server : Server;
+		
+		avatarId : int = 0;
+		
+		public this(server : Server, avatarId : int) {
+			Server = server;
+			this.avatarId = avatarId
+		}
+		
+		cosmMethod(0) GetPlace(path : string) : Place {
+			if(path == "/")
+				Server.DefaultPlace
+			else
+				null
+		}
+		
+		cosmProperty(1) AvatarId : int { get { avatarId } }
+	}
+}

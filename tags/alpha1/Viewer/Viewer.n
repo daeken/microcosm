@@ -1,0 +1,307 @@
+using System.Math;
+using System.Net;
+using System.Net.Sockets;
+using Nemerle;
+using Nemerle.Collections;
+using Nextem.String;
+
+using SdlDotNet.Core;
+using SdlDotNet.Input;
+using SdlDotNet.Graphics;
+using Tao.OpenGl.Gl;
+using Tao.OpenGl.Glu;
+
+using Microcosm.Common;
+
+namespace Microcosm.Viewer {
+	type Vert = float * float * float;
+	type Color = float * float * float;
+	type Tri = (int * int * int) * (Color * Color * Color);
+	
+	[CosmInterface]
+	public class Cosm {
+		public remoteMethod(0) GetPlace(path : string) : Place;
+		public remoteProperty(1) AvatarId : int { get }
+	}
+	
+	[CosmInterface]
+	public class Place {
+		public remoteProperty(0) Places : list [Place] { get }
+		public remoteProperty(1) Renderables : list [Renderable] { get }
+		public remoteProperty(2) IsMultiUser : bool { get }
+		public remoteEvent(3) event AvatarUpdate : CosmEventHandler [int * ((float * float * float) * (float * float * float))];
+		public remoteProperty(4) StartLocation : (float * float * float) * (float * float * float) { get }
+		public remoteMethod(5) Enter(viewer : Viewer) : void;
+		public remoteProperty(6) Avatars : list [int * ((float * float * float) * (float * float * float))] { get }
+		public remoteProperty(7) DefaultAvatarModel : Model { get }
+		
+		[Memoize]
+		public GetRenderables() : list [Renderable] {
+			Renderables
+		}
+	}
+	
+	[CosmInterface]
+	public class Renderable {
+		public remoteProperty(0) Position : float * float * float { get }
+		public remoteProperty(1) Orientation : float * float * float { get }
+		public remoteProperty(2) Model : Model { get }
+		
+		[Memoize]
+		public Get() : (float * float * float) * (float * float * float) * Model {
+			(Position, Orientation, Model)
+		}
+	}
+	
+	[CosmInterface]
+	public class Model {
+		public remoteProperty(0) Verts : array [float * float * float] { get }
+		public remoteProperty(1) Tris : list [(int * int * int) * (Color * Color * Color)] { get }
+		
+		[Memoize]
+		public Get() : array [float * float * float] * list [(int * int * int) * (Color * Color * Color)] {
+			(Verts, Tris)
+		}
+	}
+	
+	[Record(Include=[avatarId])]
+	[CosmClass]
+	public class Avatar {
+		avatarId : int;
+		
+		cosmEvent(0) event PositionUpdate : CosmEventHandler [(float * float * float) * (float * float * float)];
+		public cosmProperty(1) AvatarId : int { get { avatarId } }
+		
+		public Move(pos : float * float * float, orient : float * float * float) : void {
+			unless(PositionUpdate == null) {
+				def (x, y, z) = pos;
+				def (rx, ry, rz) = orient;
+				PositionUpdate(((-x, -y, -z), (-rx, -ry, -rz)))
+			}
+		}
+	}
+	
+	[CosmClass]
+	public class Viewer {
+		Conn : Connection;
+		Server : Cosm;
+		
+		mutable Width = 800f;
+		mutable Height = 600f;
+		
+		mutable RotX : float = 0f;
+		mutable RotY : float = 0f;
+		mutable Looking : bool = false;
+		
+		mutable PosX : float = 0f;
+		mutable PosY : float = 0f;
+		mutable PosZ : float = 0f;
+		
+		mutable CurPlace : Place;
+		
+		CurAvatar : Avatar;
+		cosmProperty(0) Avatar_ : Avatar { get { CurAvatar } }
+		
+		AvatarModel : Model;
+		Avatars : Hashtable [int, (float * float * float) * (float * float * float)] = Hashtable();
+		
+		this(uri : string) {
+			def (client, path) = Connect(uri);
+			Conn = Connection(client.GetStream(), this);
+			Server = Cosm(Conn);
+			CurAvatar = Avatar(Server.AvatarId);
+			CurPlace = Server.GetPlace(path);
+			(PosX, PosY, PosZ) = CurPlace.StartLocation[0];
+			
+			CurPlace.AvatarUpdate += AvatarUpdate;
+			
+			AvatarModel = CurPlace.DefaultAvatarModel;
+			
+			CurPlace.Enter(this);
+			CurPlace.Avatars.Iter(
+				(id, loc) =>
+					when(id != CurAvatar.AvatarId) Avatars[id] = loc
+			);
+			
+			Setup();
+			Events.Run()
+		}
+		
+		Setup() : void {
+			Events.Tick += Tick;
+			Events.Quit +=
+				fun(_, _) {
+					Conn.Stop();
+					Events.QuitApplication()
+				}
+			Events.MouseButtonDown += 
+				fun(_, e : MouseButtonEventArgs) {
+					match(e.Button) {
+						| SecondaryButton =>
+							Mouse.ShowCursor = false;
+							Looking = true;
+							Mouse.MousePosition = System.Drawing.Point((Width / 2) :> int, (Height / 2) :> int)
+						| _ => ()
+					}
+				}
+			Events.MouseButtonUp += 
+				fun(_, e : MouseButtonEventArgs) {
+					match(e.Button) {
+						| SecondaryButton =>
+							Mouse.ShowCursor = true;
+							Looking = false
+						| _ => ()
+					}
+				}
+			Events.MouseMotion +=
+				fun(_, e : MouseMotionEventArgs) {
+					when(Looking) {
+						RotX += (e.Y - (Height / 2)) * 1f;
+						RotY += (e.X - (Width  / 2)) * 1f;
+						Mouse.MousePosition = System.Drawing.Point((Width / 2) :> int, (Height / 2) :> int);
+						CurAvatar.Move((PosX, PosY, PosZ), (RotX, RotY, 0f))
+					}
+				}
+			Events.KeyboardDown += 
+				fun(_, e : KeyboardEventArgs) {
+					def move(x, z) {
+						if(z != 0f) {
+							def xrad = (RotX / 180 * 3.141592654f); 
+							def yrad = (RotY / 180 * 3.141592654f);
+							PosX += z * (Sin(yrad) :> float);
+							PosY -= z * (Sin(xrad) :> float);
+							PosZ -= z * (Cos(yrad) :> float)
+						} else {
+							def yrad = ((RotY + 90f) / 180f * 3.141592654f); 
+							PosX += x * (Sin(yrad) :> float);
+							PosZ -= x * (Cos(yrad) :> float)
+						}
+						CurAvatar.Move((PosX, PosY, PosZ), (RotX, RotY, 0f))
+					}
+					
+					match(e.Key) {
+						| W | UpArrow    => move( 0f, -1f)
+						| S | DownArrow  => move( 0f,  1f)
+						| A | LeftArrow  => move( 1f,  0f)
+						| D | RightArrow => move(-1f,  0f)
+						| _ => ()
+					}
+				}
+			Events.Fps = 60;
+			
+			_ = Video.SetVideoMode(Width :> int, Height :> int, true, true);
+			
+			Reshape(1000f);
+			
+			glShadeModel(GL_SMOOTH);
+			glClearColor(0.0F, 0.0F, 0.0F, 0.5F);
+			glClearDepth(1.0F);
+			glEnable(GL_DEPTH_TEST);
+			glDepthFunc(GL_LEQUAL);
+			glHint(GL_PERSPECTIVE_CORRECTION_HINT, GL_NICEST);
+			glDisable(GL_CULL_FACE);
+			glEnable(GL_COLOR);
+			//glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+		}
+		
+		Connect(uri : string) : TcpClient * string {
+			def uri = 
+				if(uri.StartsWith("cosm://")) uri.Slice(7)
+				else uri;
+			def (host, path) = 
+				if(uri.Contains("/")) uri.Split1("/")
+				else (uri, "");
+			def path = "/" + path;
+			def (host, port) = 
+				if(host.Contains(":")) host.Split1(":")
+				else (host, "32623");
+			
+			def host = Dns.GetHostEntry(host);
+			def client = TcpClient();
+			
+			def host = 
+				block: {
+					foreach(addr in host.AddressList)
+						when(addr.AddressFamily == AddressFamily.InterNetwork)
+							block(addr);
+					null
+				}
+			
+			client.Connect(host, int.Parse(port));
+			(client, path)
+		}
+		
+		AvatarUpdate(id : int, loc : (float * float * float) * (float * float * float)) : void {
+			unless(id == CurAvatar.AvatarId)
+				lock(Avatars)
+					Avatars[id] = loc
+		}
+		
+		Reshape(distance : float) : void {
+			glViewport(0, 0, Width :> int, Height :> int);
+			glMatrixMode(GL_PROJECTION);
+			glLoadIdentity();
+			gluPerspective(45.0F, (Width / Height), 0.1F, distance);
+			glMatrixMode(GL_MODELVIEW);
+			glLoadIdentity()
+		}
+		
+		Tick(_ : object, _ : TickEventArgs) : void {
+			glClear((GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT));
+			glLoadIdentity();
+			glRotatef(RotX, 0.25f, 0.0f, 0.0f);
+			glRotatef(RotY, 0.0f, 0.25f, 0.0f);
+			glTranslatef(PosX, PosY, PosZ);
+			
+			CurPlace.GetRenderables().Iter(Render);
+			
+			lock(Avatars)
+				foreach((pos, orient) in Avatars.Values) {
+					glPushMatrix();
+					glTranslatef(pos);
+					glRotatef(orient[0], 1f, 0f, 0f);
+					glRotatef(orient[1], 0f, 1f, 0f);
+					glRotatef(orient[2], 0f, 0f, 1f);
+					glBegin(GL_TRIANGLES);
+					Render(AvatarModel.Get());
+					glEnd();
+					glPopMatrix()
+				}
+			
+			Video.GLSwapBuffers()
+		}
+		
+		Render(renderable : Renderable) : void {
+			def (pos, orient, model) = renderable.Get();
+			glPushMatrix();
+			glTranslatef(pos);
+			glRotatef(orient[0], 1f, 0f, 0f);
+			glRotatef(orient[1], 0f, 1f, 0f);
+			glRotatef(orient[2], 0f, 0f, 1f);
+			glBegin(GL_TRIANGLES);
+			Render(model.Get());
+			glEnd();
+			glPopMatrix()
+		}
+		Render(verts : array [Vert], tris : list [Tri]) : void {
+			match(tris) {
+				| [] => ()
+				| ((a, b, c), (aColor, bColor, cColor)) :: tail =>
+					glColor3f(aColor);
+					glVertex3f(verts[a]);
+					glColor3f(bColor);
+					glVertex3f(verts[b]);
+					glColor3f(cColor);
+					glVertex3f(verts[c]);
+					Render(verts, tail)
+			}
+		}
+		
+		public static Main(args : array [string]) : void {
+			_ = Viewer(
+				if(args.Length > 0) args[0]
+				else "cosm://localhost/"
+			)
+		}
+	}
+}

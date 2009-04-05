@@ -1,0 +1,691 @@
+using Nemerle.Collections;
+using Nemerle.Compiler;
+using Nemerle.Compiler.Parsetree;
+
+using Nextem.String;
+
+namespace Microcosm.Common {
+	internal module Helper {
+		public Methods : Hashtable [TypeBuilder, Hashtable [int, PExpr]] = Hashtable();
+		Conn : PExpr = <[ $("_conn" : usesite) ]>;
+		
+		public AddMethod(t : TypeBuilder, ordinal : int, expr : PExpr) : void {
+			unless(Methods.ContainsKey(t))
+				Methods[t] = Hashtable();
+			Methods[t][ordinal] = expr
+		}
+		
+		public IsRemote(ty : TypeInfo) : bool {
+			if(ty == null) false
+			else if(ty.FullName == "Microcosm.Common.CosmObjectRef") true
+			else IsRemote(ty.BaseType)
+		}
+		
+		public BuildReader(breader : PExpr, typ : MType) : PExpr {
+			match(typ) {
+				| Class(tyinfo, args) =>
+					match(tyinfo.FullName) {
+						| "Nemerle.Core.list['a]" when args.Length == 1 =>
+							def read = BuildReader(breader, args.Head :> MType);
+							<[
+								def count = $breader.ReadInt32();
+								mutable list = [];
+								for(mutable i = 0; i < count; ++i)
+									list ::= $read;
+								list.Reverse()
+							]>
+						| "System.String" =>
+							<[
+								def len = $breader.ReadInt32();
+								def bytes = $breader.ReadBytes(len);
+								System.Text.UTF8Encoding().GetString(bytes, 0, len)
+							]>
+						| "System.Boolean" => <[ $breader.ReadBoolean() ]>
+						| "System.SByte"   => <[ $breader.ReadSByte  () ]>
+						| "System.Int16"   => <[ $breader.ReadInt16  () ]>
+						| "System.Int32"   => <[ $breader.ReadInt32  () ]>
+						| "System.Int64"   => <[ $breader.ReadInt64  () ]>
+						| "System.Byte"    => <[ $breader.ReadByte   () ]>
+						| "System.UInt16"  => <[ $breader.ReadUInt16 () ]>
+						| "System.UInt32"  => <[ $breader.ReadUInt32 () ]>
+						| "System.UInt64"  => <[ $breader.ReadUInt64 () ]>
+						| "System.Single"  => <[ $breader.ReadSingle () ]>
+						| "System.Double"  => <[ $breader.ReadDouble () ]>
+						| _ => 
+							def tyinfo = tyinfo :> TypeBuilder;
+							def tyexpr = <[ $(tyinfo.ParsedName : name) ]>;
+							def id = <[ $breader.ReadUInt32() ]>;
+							if(Helper.IsRemote(tyinfo))
+								<[ $tyexpr($Conn, $id :> int) ]>
+							else
+								<[ $Conn.LocalObjectRefs[(id & 0x7FFFFFFFU) :> int] :> $tyexpr ]>
+					}
+				| Array(t, rank) when rank == 1 =>
+					def read = BuildReader(breader, t :> MType);
+					<[
+						def count = $breader.ReadInt32();
+						def arr = array(count);
+						for(mutable i = 0; i < count; ++i)
+							arr[i] = $read;
+						arr
+					]>
+				| Tuple(args) =>
+					def args = args.Map(arg => BuildReader(breader, arg :> MType));
+					<[ ( .. $args ) ]>
+				| _ => null
+			}
+		}
+		
+		public BuildWriter(bwriter : PExpr, typ : MType, inp : PExpr) : PExpr {
+			match(typ) {
+				| Class(tyinfo, args) =>
+					match(tyinfo.FullName) {
+						| "Nemerle.Core.list['a]" when args.Length == 1 =>
+							def writer = BuildWriter(bwriter, args.Head :> MType, <[ x ]>);
+							<[
+								$bwriter.Write($inp.Length);
+								$inp.Iter(x => $writer)
+							]>
+						| "System.String" =>
+							<[
+								def bytes = System.Text.UTF8Encoding().GetBytes($inp);
+								$bwriter.Write(bytes.Length);
+								$bwriter.Write(bytes)
+							]>
+						| "System.Boolean"
+						| "System.SByte"
+						| "System.Int16"
+						| "System.Int32"
+						| "System.Int64"
+						| "System.Byte"
+						| "System.UInt16"
+						| "System.UInt32"
+						| "System.UInt64"
+						| "System.Single"
+						| "System.Double" => <[ $bwriter.Write($inp) ]>
+						| _ =>
+							if(Helper.IsRemote(tyinfo)) // Send remote ref back to them
+								<[
+									$bwriter.Write(0x80000000U | ($inp.Id :> uint))
+								]>
+							else
+								<[
+									$bwriter.Write($Conn.StoreRef($inp))
+								]>
+					}
+				| Array(t, rank) when rank == 1 =>
+					def writer = BuildWriter(bwriter, t :> MType, <[ $inp[i] ]>);
+					<[
+						$bwriter.Write($inp.Length);
+						for(mutable i = 0; i < $inp.Length; ++i)
+							$writer
+					]>
+				| Tuple(args) =>
+					def sub(args, split=[], writers=[]) {
+						match(args) {
+							| [] => (split.Reverse(), writers.Reverse())
+							| t :: tail =>
+								def val = <[ $(("_{0}" <- split.Length) : usesite) ]>;
+								sub(
+									tail,
+									val :: split,
+									BuildWriter(bwriter, t :> MType, val) :: writers
+								)
+						}
+					}
+					
+					def (split, writers) = sub(args);
+					
+					<[
+						def ( .. $split ) = $inp;
+						{ .. $writers }
+					]>
+				| _ => <[ () ]>
+			}
+		}
+		
+		public TyExpr(ty : TyVar) : PExpr {
+			match(ty :> MType) {
+				| Class(tyinfo, args) =>
+					def subName(names, accum=null) {
+						match(names) {
+							| [] => accum
+							| name :: tail when accum == null =>
+								subName(tail, <[ $(name : usesite) ]>)
+							| mem :: tail =>
+								subName(tail, <[ $accum.$(mem : usesite) ]>)
+						}
+					}
+					def ty = subName(tyinfo.NamespaceNode.FullName);
+					
+					match(args) {
+						| [] => ty
+						| args => <[ $ty [ .. $(args.Map(TyExpr)) ] ]>
+					}
+				| Tuple(args) =>
+					<[ @* ( .. $(args.Map(TyExpr)) ) ]>
+				| Array(ty, rank) when rank == 1 =>
+					<[ array [$(TyExpr(ty))] ]>
+				| Void => <[ void ]>
+				| _ => null
+			}
+		}
+	}
+	
+	[Nemerle.MacroUsage(
+		Nemerle.MacroPhase.BeforeInheritance, 
+		Nemerle.MacroTargets.Class,
+		Inherited = true
+	)]
+	macro CosmClass(t : TypeBuilder) {
+		t.AddImplementedInterface(<[ Microcosm.Common.ICosmObject ]>)
+	}
+	
+	[Nemerle.MacroUsage(
+		Nemerle.MacroPhase.WithTypedMembers, 
+		Nemerle.MacroTargets.Class,
+		Inherited = true
+	)]
+	macro CosmClass(t : TypeBuilder) {
+		def cases = 
+			if(Helper.Methods.ContainsKey(t))
+				Helper.Methods[t].Fold(
+					[], 
+					fun(ord, expr, accum) {
+						<[ case: 
+							| $(ord : int) => $expr
+						]> :: accum
+					}
+				)
+			else [];
+		def cases = (<[ case: | _ => () ]> :: cases).Reverse();
+		
+		t.Define(
+			<[ decl:
+				public override Call(
+					$("_conn" : usesite) : Microcosm.Common.Connection, 
+					$("_breader" : usesite) : System.IO.BinaryReader, 
+					ord : int, 
+					$("_msgId" : usesite) : int
+				) : void {
+					match(ord) {
+						.. $cases
+					}
+				}
+			]>
+		)
+	}
+	
+	[Nemerle.MacroUsage(
+		Nemerle.MacroPhase.WithTypedMembers, 
+		Nemerle.MacroTargets.Method
+	)]
+	macro Method(t : TypeBuilder, m : MethodBuilder, ordinal : int)
+	syntax("cosmMethod", "(", ordinal, ")") {
+		def conn = <[ $("_conn" : usesite) ]>;
+		def breader = <[ $("_breader" : usesite) ]>;
+		def args = m.Header.parms.Map(arg => Helper.BuildReader(breader, arg.ty :> MType));
+		
+		def call = <[ $(m.Name : usesite) (.. $args) ]>;
+		def msgId = <[ $("_msgId" : usesite) ]>;
+		def built = 
+			match(m.Header.ret_type :> MType) {
+				| Void =>
+					<[
+						$call;
+						$conn.Write(
+							Opcode.Return, 
+							bwriter => bwriter.Write($msgId)
+						)
+					]>
+				| ret =>
+					<[
+						def val = $call;
+						$conn.Write(
+							Opcode.Return, 
+							fun(bwriter) {
+								bwriter.Write($msgId);
+								$( Helper.BuildWriter(<[ bwriter ]>, ret, <[ val ]>) )
+							}
+						)
+					]>
+			}
+		
+		Helper.AddMethod(
+			t, 
+			ordinal, 
+			built
+		)
+	}
+	
+	[Nemerle.MacroUsage(
+		Nemerle.MacroPhase.WithTypedMembers, 
+		Nemerle.MacroTargets.Property
+	)]
+	macro Property(t : TypeBuilder, p : PropertyBuilder, ordinal : int)
+	syntax("cosmProperty", "(", ordinal, ")") {
+		def conn = <[ $("_conn" : usesite) ]>;
+		def breader = <[ $("_breader" : usesite) ]>;
+		def msgId = <[ $("_msgId" : usesite) ]>;
+		def getter = 
+			if(p.GetGetter() != null) {
+				def writer = Helper.BuildWriter(<[ bwriter ]>, p.GetGetter().Header.ret_type :> MType, <[ this.$(p.Name : usesite) ]>);
+				<[
+					$conn.Write(
+						Opcode.Return, 
+						fun(bwriter) {
+							bwriter.Write($msgId);
+							$writer
+						}
+					)
+				]>
+			} else <[ () ]>;
+		def setter = 
+			if(p.GetSetter() != null) {
+				def reader = Helper.BuildReader(breader, p.GetSetter().Header.parms.Head.ty :> MType);
+				<[
+					this.$(p.Name : usesite) = $reader;
+					$conn.Write(
+						Opcode.Return, 
+						bwriter => bwriter.Write($msgId)
+					)
+				]>
+			} else <[ () ]>;
+		def built = 
+			<[
+				def getset = $breader.ReadSByte();
+				match(getset) {
+					| 0 => $getter
+					| 1 => $setter
+					| _ => ()
+				}
+			]>;
+		
+		Helper.AddMethod(
+			t, 
+			ordinal, 
+			built
+		)
+	}
+	
+	[Nemerle.MacroUsage(
+		Nemerle.MacroPhase.WithTypedMembers, 
+		Nemerle.MacroTargets.Event
+	)]
+	macro Event(t : TypeBuilder, e : EventBuilder, ordinal : int)
+	syntax("cosmEvent", "(", ordinal, ")") {
+		def conn = <[ $("_conn" : usesite) ]>;
+		def breader = <[ $("_breader" : usesite) ]>;
+		def msgId = <[ $("_msgId" : usesite) ]>;
+		def evt = <[ this.$(e.Name : usesite) ]>;
+		def fullty = e.GetMemType();
+		def ty = 
+			match(fullty) {
+				| Class(tyinfo, args) as x =>
+					match(tyinfo.FullName) {
+						| "Microcosm.Common.CosmEventHandler[T]" =>
+							args.Head :> MType
+						| _ => x
+					}
+				| x => x
+			}
+		def writer = Helper.BuildWriter(<[ bwriter ]>, ty, <[ val ]>);
+		def built = 
+			<[
+				match($breader.ReadSByte()) {
+					| 0 =>
+						mutable id : int;
+						def callback(val : $(Helper.TyExpr(ty))) : void {
+							$conn.Write(
+								Opcode.DelegateCall, 
+								fun(bwriter) {
+									bwriter.Write(id);
+									$writer
+								}
+							)
+						}
+						id = $conn.AddDelegate(callback : object);
+						$evt += callback;
+						$conn.Write(
+							Opcode.Return, 
+							fun(bwriter) {
+								bwriter.Write($msgId);
+								bwriter.Write(id)
+							}
+						)
+					| 1 =>
+						def id = $breader.ReadInt32();
+						$evt -= $conn.RemoveDelegate(id) :> $(Helper.TyExpr(fullty));
+						$conn.Write(
+							Opcode.Return, 
+							bwriter => bwriter.Write($msgId)
+						)
+					| _ => ()
+				}
+			]>;
+		
+		Helper.AddMethod(
+			t, 
+			ordinal, 
+			built
+		)
+	}
+	
+	[Nemerle.MacroUsage(
+		Nemerle.MacroPhase.BeforeInheritance, 
+		Nemerle.MacroTargets.Class
+	)]
+	macro CosmInterface(t : TypeBuilder) {
+		t.AddImplementedInterface(<[ Microcosm.Common.CosmObjectRef ]>);
+		t.Define(
+			<[ decl:
+				public this(conn : Connection) {
+					base(conn)
+				}
+			]>
+		);
+		t.Define(
+			<[ decl:
+				public this(conn : Connection, id : int) {
+					base(conn, id)
+				}
+			]>
+		)
+	}
+	
+	[Nemerle.MacroUsage(
+		Nemerle.MacroPhase.WithTypedMembers, 
+		Nemerle.MacroTargets.Class
+	)]
+	macro CosmInterface(_t : TypeBuilder) {
+	}
+	
+	[Nemerle.MacroUsage(
+		Nemerle.MacroPhase.BeforeInheritance, 
+		Nemerle.MacroTargets.Method
+	)]
+	macro RemoteMethod(_t : TypeBuilder, m : ParsedMethod, _ordinal : int)
+	syntax("remoteMethod", "(", _ordinal, ")") {
+		def args = m.header.parms.Map(arg => <[ $(arg.Name : usesite) ]>);
+		def name = m.header.name.GetName().idl;
+		def func = <[ $("_Dispatch{0}" <- name : usesite) ]>;
+		m.Body = <[ $func( .. $args ) ]>
+	}
+	
+	[Nemerle.MacroUsage(
+		Nemerle.MacroPhase.WithTypedMembers, 
+		Nemerle.MacroTargets.Method
+	)]
+	macro RemoteMethod(t : TypeBuilder, m : MethodBuilder, ordinal : int)
+	syntax("remoteMethod", "(", ordinal, ")") {
+		def ret = Helper.TyExpr(m.Header.ret_type);
+		
+		def argsSync = 
+			m.Header.parms.Map(
+				arg => Fun_parm(<[ $(arg.Name : usesite) : $(Helper.TyExpr(arg.ty)) ]>)
+			);
+		def name = m.Header.name;
+		def funcSync  = Splicable.Name(Name("_Dispatch{0}" <- name));
+		def _cb = <[ $("_cb" : usesite) ]>;
+		def argsAsync = argsSync + [Fun_parm(<[ $_cb : $ret -> void ]>)];
+		def funcAsync = Splicable.Name(Name(name));
+		
+		def argsSyncCall = m.Header.parms.Map(arg => <[ $(arg.Name : usesite) ]>) + [<[ syncCallback ]>];
+		
+		def writers = m.Header.parms.Map(arg => Helper.BuildWriter(<[ bwriter ]>, arg.ty :> MType, <[ $(arg.Name : usesite) ]>));
+		
+		def read = 
+			match(ret) {
+				| <[ void ]> => <[ () ]>
+				| _ => Helper.BuildReader(<[ breader ]>, m.Header.ret_type :> MType)
+			}
+		
+		def callback = 
+			match(ret) {
+				| <[ void ]> =>
+					<[
+						def callback(_, _) {
+							unless($_cb == null)
+								$_cb()
+						}
+					]>
+				| _ =>
+					<[
+						def callback(_, breader : System.IO.BinaryReader) {
+							def data = $read;
+							unless($_cb == null)
+								$_cb(data)
+						}
+					]>
+			}
+		
+		t.Define(
+			<[ decl:
+				internal $funcAsync( .. $argsAsync ) : void {
+					def $("_conn" : usesite) = this.Conn;
+					$callback;
+					
+					def cbId = this.Conn.AddCallback(callback);
+					this.Conn.Write(
+						Opcode.Call, 
+						fun(bwriter) {
+							bwriter.Write(this.Id);
+							bwriter.Write($(ordinal : int) : int);
+							bwriter.Write(cbId);
+							{ .. $writers }
+						}
+					)
+				}
+			]>
+		);
+		match(ret) {
+			| <[ void ]> => 
+				t.Define(
+					<[ decl:
+						internal $funcSync( .. $argsSync ) : void {
+							mutable done = false;
+							def syncCallback() {
+								done = true
+							}
+							$(name : usesite)( .. $argsSyncCall );
+							while(!done) {}
+						}
+					]>
+				)
+			| _ =>
+				t.Define(
+					<[ decl:
+						internal $funcSync( .. $argsSync ) : $ret {
+							mutable done : bool = false;
+							mutable data : $ret;
+							def syncCallback(ret : $ret) {
+								data = ret;
+								done = true
+							}
+							$(name : usesite)( .. $argsSyncCall );
+							while(!done) {}
+							data
+						}
+					]>
+				);
+		}
+	}
+	
+	[Nemerle.MacroUsage(
+		Nemerle.MacroPhase.BeforeInheritance, 
+		Nemerle.MacroTargets.Property
+	)]
+	macro RemoteProperty(_t : TypeBuilder, p : ParsedProperty, _ordinal : int)
+	syntax("remoteProperty", "(", _ordinal, ")") {
+		def name = p.name.GetName().idl;
+		match(p.get) {
+			| None => ()
+			| Some(get) =>
+				def func = <[ $("_Dispatch{0}Get" <- name : usesite) ]>;
+				get.Body = <[ $func() ]>
+		}
+		match(p.set) {
+			| None => ()
+			| Some(set) =>
+				def func = <[ $("_Dispatch{0}Set" <- name : usesite) ]>;
+				set.Body = <[ $func($("value" : usesite)) ]>
+		}
+	}
+	
+	[Nemerle.MacroUsage(
+		Nemerle.MacroPhase.WithTypedMembers, 
+		Nemerle.MacroTargets.Property
+	)]
+	macro RemoteProperty(t : TypeBuilder, p : PropertyBuilder, ordinal : int)
+	syntax("remoteProperty", "(", ordinal, ")") {
+		def ty = Helper.TyExpr(p.GetMemType());
+		def name = p.Name;
+		match(p.GetGetter()) {
+			| null => ()
+			| _ =>
+				def getName = Splicable.Name(Name("_Dispatch{0}Get" <- name));
+				def reader = Helper.BuildReader(<[ breader ]>, p.GetMemType());
+				t.Define(
+					<[ decl:
+						internal $getName() : $ty {
+							def $("_conn" : usesite) = this.Conn;
+							mutable done = false;
+							mutable data : $ty;
+							
+							def callback(_, breader : System.IO.BinaryReader) {
+								data = $reader;
+								done = true
+							}
+							
+							def cbId = this.Conn.AddCallback(callback);
+							this.Conn.Write(
+								Opcode.Call, 
+								fun(bwriter) {
+									bwriter.Write(this.Id);
+									bwriter.Write($(ordinal : int) : int);
+									bwriter.Write(cbId);
+									bwriter.Write(0 :> sbyte)
+								}
+							);
+							
+							while(!done) {}
+							data
+						}
+					]>
+				)
+		}
+		match(p.GetSetter()) {
+			| null => ()
+			| _ =>
+				def setName = Splicable.Name(Name("_Dispatch{0}Set" <- name));
+				def writer = Helper.BuildWriter(<[ bwriter ]>, p.GetMemType(), <[ value ]>);
+				t.Define(
+					<[ decl:
+						internal $setName(value : $ty) : void {
+							def $("_conn" : usesite) = this.Conn;
+							mutable done = false;
+							def callback(_, _) {
+								done = true
+							}
+							
+							def cbId = this.Conn.AddCallback(callback);
+							this.Conn.Write(
+								Opcode.Call, 
+								fun(bwriter) {
+									this.Conn.BWriter.Write(this.Id);
+									this.Conn.BWriter.Write($(ordinal : int) : int);
+									this.Conn.BWriter.Write(cbId);
+									this.Conn.BWriter.Write(1 :> sbyte);
+									
+									$writer
+								}
+							);
+							
+							while(!done) {}
+						}
+					]>
+				)
+		}
+	}
+	
+	[Nemerle.MacroUsage(
+		Nemerle.MacroPhase.BeforeInheritance, 
+		Nemerle.MacroTargets.Event
+	)]
+	macro RemoteEvent(t : TypeBuilder, e : ParsedEvent, ordinal : int)
+	syntax("remoteEvent", "(", ordinal, ")") {
+		def ty = 
+			match(e) {
+				| Event(ty, _field, _add, _rem) => ty
+			}
+		
+		def name = e.name.GetName().idl;
+		e.name = Splicable.Name(Name("___" + name));
+		def body = 
+			match(ty) {
+				| <[ CosmEventHandler [$ty] ]> =>
+					match(ty) {
+						| <[ void ]> =>
+							<[
+								_ = value.DynamicInvoke(null)
+							]>
+						| _ =>
+							def argReader = <[ this.$("readArg_{0}" <- name : usesite)(breader) ]>;
+							<[
+								_ = value.DynamicInvoke(array [$argReader])
+							]>
+					}
+				| _ => null
+			}
+		t.Define(
+			<[ decl:
+				[Microcosm.Common.RemoteEventFixup($(ordinal : int))]
+				public event $(name : usesite) : $ty {
+					add {
+						this.$("Conn" : usesite).AddRemoteDelegate(
+								this.Id, 
+								$(ordinal : int), 
+								value : object, 
+								fun(breader : System.IO.BinaryReader) {
+									$body
+								}
+							)
+					}
+					remove {
+						this.$("Conn" : usesite).RemoveRemoteDelegate(
+								this.Id, 
+								$(ordinal : int), 
+								value : object
+							)
+					}
+				}
+			]>
+		)
+	}
+	
+	[Nemerle.MacroUsage(
+		Nemerle.MacroPhase.WithTypedMembers, 
+		Nemerle.MacroTargets.Event
+	)]
+	macro RemoteEventFixup(t : TypeBuilder, e : EventBuilder, _ordinal : int) {
+		def ty = 
+			match(e.GetMemType()) {
+				| Class(tyinfo, args) =>
+					match(tyinfo.FullName) {
+						| "Microcosm.Common.CosmEventHandler[T]" =>
+							args.Head :> MType
+						| _ => null
+					}
+				| _ => null
+			}
+		def readName = Splicable.Name(Name("readArg_{0}" <- e.Name));
+		t.Define(
+			<[ decl:
+				internal $readName(breader : System.IO.BinaryReader) : $(Helper.TyExpr(ty)) {
+					def $("_conn" : global) = this.Conn;
+					$(Helper.BuildReader(<[ breader ]>, ty))
+				}
+			]>
+		)
+	}
+}

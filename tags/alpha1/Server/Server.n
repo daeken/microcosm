@@ -1,0 +1,83 @@
+using System.Net;
+using System.Net.Sockets;
+using System.Threading;
+using Nextem.String;
+
+using Microcosm.Common;
+
+namespace Microcosm.Server {
+	public class Server {
+		public DefaultPlace : Place;
+		
+		mutable avatarId : int = 0;
+		AvatarId : int {
+			get {
+				lock(this) {
+					avatarId++;
+					avatarId
+				}
+			}
+		}
+		
+		this(port : int) {
+			def avatar = 
+				Model.Cube(
+					(-0.5f, -0.5f, -0.5f), 
+					( 0.5f,  0.5f,  0.5f), 
+					(1f, 0f, 1f)
+				);
+			
+			DefaultPlace = 
+				Place(
+					[], 
+					BuildHouses(), 
+					true, 
+					((0f, -4f, -25f), (0f, 0f, 0f)), 
+					avatar
+				);
+			
+			def listener = TcpListener(IPAddress.Any, port);
+			listener.Start();
+			
+			while(true)
+				Thread(fun(x : object) { GotClient(x :> TcpClient) }).Start(listener.AcceptTcpClient())
+		}
+		
+		BuildHouses() : list [Renderable] {
+			def colors = 
+				[
+					((1f, 0f, 0f), (0f, 0f, 1f)), 
+					((0f, 0f, 1f), (0f, 1f, 0f))
+				];
+			mutable houses = [];
+			mutable x = 6f * (colors.Length/2);
+			foreach((main, roof) in colors) {
+				houses ::= 
+					Renderable(
+						(x, 0f, 0f), 
+						(0f, 0f, 0f), 
+						Model.House(
+							6f, 8f, 15f, 1f, 
+							main, roof
+						)
+					);
+				x -= 12f
+			}
+			houses
+		}
+		
+		GotClient(client : TcpClient) : void {
+			def _conn = 
+				Connection(client.GetStream(), Cosm(this, AvatarId));
+		}
+		
+		public static Main(args : array [string]) : void {
+			_ = Server(
+				int.Parse(
+					if(args.Length > 0) args[0]
+					else "32623"
+				)
+			)
+		}
+	}
+}
