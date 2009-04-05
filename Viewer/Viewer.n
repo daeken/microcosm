@@ -105,13 +105,12 @@ namespace Microcosm.Viewer {
 		AvatarModel : Model;
 		Avatars : Hashtable [int, (float * float * float) * (float * float * float)] = Hashtable();
 		
-		this(ip : string = "127.0.0.1", port : string = "90") {
-			def client = TcpClient();
-			client.Connect(IPAddress.Parse(ip), int.Parse(port));
+		this(uri : string) {
+			def (client, path) = Connect(uri);
 			Conn = Connection(client.GetStream(), this);
 			Server = Cosm(Conn);
 			CurAvatar = Avatar(Server.AvatarId);
-			CurPlace = Server.GetPlace("/");
+			CurPlace = Server.GetPlace(path);
 			(PosX, PosY, PosZ) = CurPlace.StartLocation[0];
 			
 			CurPlace.AvatarUpdate += AvatarUpdate;
@@ -205,6 +204,33 @@ namespace Microcosm.Viewer {
 			//glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 		}
 		
+		Connect(uri : string) : TcpClient * string {
+			def uri = 
+				if(uri.StartsWith("cosm://")) uri.Slice(7)
+				else uri;
+			def (host, path) = 
+				if(uri.Contains("/")) uri.Split1("/")
+				else (uri, "");
+			def path = "/" + path;
+			def (host, port) = 
+				if(host.Contains(":")) host.Split1(":")
+				else (host, "32623");
+			
+			def host = Dns.GetHostEntry(host);
+			def client = TcpClient();
+			
+			def host = 
+				block: {
+					foreach(addr in host.AddressList)
+						when(addr.AddressFamily == AddressFamily.InterNetwork)
+							block(addr);
+					null
+				}
+			
+			client.Connect(host, int.Parse(port));
+			(client, path)
+		}
+		
 		AvatarUpdate(id : int, loc : (float * float * float) * (float * float * float)) : void {
 			unless(id == CurAvatar.AvatarId)
 				lock(Avatars)
@@ -272,14 +298,10 @@ namespace Microcosm.Viewer {
 		}
 		
 		public static Main(args : array [string]) : void {
-			def (ip, port) = 
-				if(args.Length == 0)
-					("127.0.0.1", "90")
-				else if(args.Length == 1)
-					(args[0], "90")
-				else
-					(args[0], args[1]);
-			_ = Viewer(ip, port)
+			_ = Viewer(
+				if(args.Length > 0) args[0]
+				else "cosm://localhost/"
+			)
 		}
 	}
 }
