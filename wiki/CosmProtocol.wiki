@@ -3,13 +3,14 @@
 
 = Cosm (Initial object from server) =
   # `GetPlace(path : string) : Place`
+  # `AvatarId : int { get }` -- This will give you a unique avatar ID, which is stored in the viewer's Avatar object
 
 = Viewer (Initial object from client) =
   # `Avatar : Avatar { get }` -- Gets the avatar object for the viewer
 
 = Avatar =
   # `event PositionUpdate : CosmEventHandler [(float * float * float) * (float * float * float)]` -- The server can attach to this event to get position updates, e.g. in a multiuser env
-  # `Model : Model { get }`
+  # `AvatarId : int { get }` -- Unique ID for this avatar in this connection
 
 = Place =
   # `Places : list [Place] { get }`
@@ -18,6 +19,7 @@
   # `event AvatarUpdate : CosmEventHandler [int * ((float * float * float) * (float * float * float))]` -- If the Place is multi-user, this will allow viewers to get avatar information
   # `StartLocation : (float * float * float) * (float * float * float) { get }` -- This is the starting position and orientation for avatars
   # `Enter(viewer : Viewer) : void` -- Called on entrance
+  # `DefaultAvatarModel : Model { get }`
 
 = Renderable =
   # `Position : float * float * float { get }`
