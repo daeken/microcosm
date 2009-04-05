@@ -19,7 +19,7 @@ namespace Microcosm.Server {
 			}
 		}
 		
-		this() {
+		this(port : int) {
 			def avatar = 
 				Model.Cube(
 					(-0.5f, -0.5f, -0.5f), 
@@ -36,7 +36,7 @@ namespace Microcosm.Server {
 					avatar
 				);
 			
-			def listener = TcpListener(IPAddress.Any, 90);
+			def listener = TcpListener(IPAddress.Any, port);
 			listener.Start();
 			
 			while(true)
@@ -71,8 +71,13 @@ namespace Microcosm.Server {
 				Connection(client.GetStream(), Cosm(this, AvatarId));
 		}
 		
-		public static Main() : void {
-			_ = Server()
+		public static Main(args : array [string]) : void {
+			_ = Server(
+				int.Parse(
+					if(args.Length > 0) args[0]
+					else "32623"
+				)
+			)
 		}
 	}
 }
