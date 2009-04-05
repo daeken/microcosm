@@ -32,7 +32,8 @@ namespace Microcosm.Viewer {
 		public remoteEvent(3) event AvatarUpdate : CosmEventHandler [int * ((float * float * float) * (float * float * float))];
 		public remoteProperty(4) StartLocation : (float * float * float) * (float * float * float) { get }
 		public remoteMethod(5) Enter(viewer : Viewer) : void;
-		public remoteProperty(6) DefaultAvatarModel : Model { get }
+		public remoteProperty(6) Avatars : list [int * ((float * float * float) * (float * float * float))] { get }
+		public remoteProperty(7) DefaultAvatarModel : Model { get }
 		
 		[Memoize]
 		public GetRenderables() : list [Renderable] {
@@ -118,6 +119,10 @@ namespace Microcosm.Viewer {
 			AvatarModel = CurPlace.DefaultAvatarModel;
 			
 			CurPlace.Enter(this);
+			CurPlace.Avatars.Iter(
+				(id, loc) =>
+					when(id != CurAvatar.AvatarId) Avatars[id] = loc
+			);
 			
 			Setup();
 			Events.Run()
@@ -161,8 +166,8 @@ namespace Microcosm.Viewer {
 			Events.KeyboardDown += 
 				fun(_, e : KeyboardEventArgs) {
 					def move(x, z) {
-						def xrad = (RotX / 180 * 3.141592654f); 
 						if(z != 0f) {
+							def xrad = (RotX / 180 * 3.141592654f); 
 							def yrad = (RotY / 180 * 3.141592654f);
 							PosX += z * (Sin(yrad) :> float);
 							PosY -= z * (Sin(xrad) :> float);
@@ -170,7 +175,6 @@ namespace Microcosm.Viewer {
 						} else {
 							def yrad = ((RotY + 90f) / 180f * 3.141592654f); 
 							PosX += x * (Sin(yrad) :> float);
-							PosY -= x * (Sin(xrad) :> float);
 							PosZ -= x * (Cos(yrad) :> float)
 						}
 						CurAvatar.Move((PosX, PosY, PosZ), (RotX, RotY, 0f))
@@ -225,17 +229,18 @@ namespace Microcosm.Viewer {
 			
 			CurPlace.GetRenderables().Iter(Render);
 			
-			foreach((pos, orient) in Avatars.Values) {
-				glPushMatrix();
-				glTranslatef(pos);
-				glRotatef(orient[0], 1f, 0f, 0f);
-				glRotatef(orient[1], 0f, 1f, 0f);
-				glRotatef(orient[2], 0f, 0f, 1f);
-				glBegin(GL_TRIANGLES);
-				Render(AvatarModel.Get());
-				glEnd();
-				glPopMatrix()
-			}
+			lock(Avatars)
+				foreach((pos, orient) in Avatars.Values) {
+					glPushMatrix();
+					glTranslatef(pos);
+					glRotatef(orient[0], 1f, 0f, 0f);
+					glRotatef(orient[1], 0f, 1f, 0f);
+					glRotatef(orient[2], 0f, 0f, 1f);
+					glBegin(GL_TRIANGLES);
+					Render(AvatarModel.Get());
+					glEnd();
+					glPopMatrix()
+				}
 			
 			Video.GLSwapBuffers()
 		}
