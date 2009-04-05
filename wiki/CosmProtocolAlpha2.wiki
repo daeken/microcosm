@@ -1,0 +1,33 @@
+#summary Cosm world protocol alpha2
+#labels Featured,Phase-Design
+
+= Cosm (Initial object from server) =
+  # `GetPlace(path : string) : Place`
+  # `AvatarId : int { get }` -- This will give you a unique avatar ID, which is stored in the viewer's Avatar object
+
+= Viewer (Initial object from client) =
+  # `Avatar : Avatar { get }` -- Gets the avatar object for the viewer
+
+= Avatar =
+  # `event PositionUpdate : CosmEventHandler [(float * float * float) * (float * float * float)]` -- The server can attach to this event to get position updates, e.g. in a multiuser env
+  # `AvatarId : int { get }` -- Unique ID for this avatar in this connection
+
+= Place =
+  # `event PlaceUpdate : CosmEventHandler [Place]` -- Called when a Place inside the current Place is updated
+  # `event PlaceRemove : CosmEventHandler [Place]`
+  # `event RenderableUpdate : CosmEventHandler [Renderable]`
+  # `event RenderableRemove : CosmEventHandler [Renderable]`
+  # `IsMultiUser : bool { get }`
+  # `event AvatarUpdate : CosmEventHandler [int * ((float * float * float) * (float * float * float))]` -- If the Place is multi-user, this will allow viewers to get avatar information
+  # `StartLocation : (float * float * float) * (float * float * float) { get }` -- This is the starting position and orientation for avatars
+  # `Enter(viewer : Viewer) : void` -- Called on entrance
+  # `DefaultAvatarModel : Model { get }`
+
+= Renderable =
+  # `Position : float * float * float { get }`
+  # `Orientation : float * float * float { get }`
+  # `Model : Model { get }`
+
+= Model _(Needs texturing support)_ =
+  # `Verts : list [float * float * float] { get }`
+  # `Tris : list [(int * int * int) * (Color * Color * Color)] { get }` -- The ints are indexes into Verts.  Color is an alias for `float * float * float * float`: RGBA 0...1
