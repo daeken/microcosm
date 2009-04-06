@@ -19,6 +19,7 @@
   # `event AvatarUpdate : CosmEventHandler [int * ((float * float * float) * (float * float * float))]` -- If the Place is multi-user, this will allow viewers to get avatar information
   # `StartLocation : (float * float * float) * (float * float * float) { get }` -- This is the starting position and orientation for avatars
   # `Enter(viewer : Viewer) : void` -- Called on entrance
+  # `Avatars : list [int * ((float * float * float) * (float * float * float))] { get }` -- Avatars currently in the Place, used by the viewer to get current positions on entrance
   # `DefaultAvatarModel : Model { get }`
 
 = Renderable =
