@@ -1,0 +1,1 @@
+Microcosm is a decentralized virtual world inspired heavily by the Metaverse described in Neal Stephenson's Snow Crash.
